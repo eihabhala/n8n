@@ -1,11 +1,16 @@
 import type Bull from 'bull';
-import { type RedisOptions } from 'ioredis';
-import { Service } from 'typedi';
-import { LoggerProxy, type IExecuteResponsePromiseData } from 'n8n-workflow';
-import config from '@/config';
+import Container, { Service } from 'typedi';
+import {
+	ApplicationError,
+	BINARY_ENCODING,
+	type IDataObject,
+	type ExecutionError,
+	type IExecuteResponsePromiseData,
+} from 'n8n-workflow';
 import { ActiveExecutions } from '@/ActiveExecutions';
-import * as WebhookHelpers from '@/WebhookHelpers';
-import { getRedisClusterNodes, getRedisPrefix } from './GenericHelpers';
+import config from '@/config';
+import { OnShutdown } from './decorators/OnShutdown';
+import { HIGHEST_SHUTDOWN_PRIORITY } from './constants';
 
 export type JobId = Bull.JobId;
 export type Job = Bull.Job<JobData>;
@@ -18,6 +23,7 @@ export interface JobData {
 
 export interface JobResponse {
 	success: boolean;
+	error?: ExecutionError;
 }
 
 export interface WebhookResponse {
@@ -29,80 +35,110 @@ export interface WebhookResponse {
 export class Queue {
 	private jobQueue: JobQueue;
 
+	/**
+	 * The number of jobs a single server can process concurrently
+	 * Any worker that wants to process executions must first set this to a non-zero value
+	 */
+	private concurrency = 0;
+
+	setConcurrency(concurrency: number) {
+		this.concurrency = concurrency;
+		// This sets the max event listeners on the jobQueue EventEmitter to prevent the logs getting flooded with MaxListenersExceededWarning
+		// see: https://github.com/OptimalBits/bull/blob/develop/lib/job.js#L497-L521
+		this.jobQueue.setMaxListeners(
+			4 + // `close`
+				2 + // `error`
+				2 + // `global:progress`
+				concurrency * 2, // 2 global events for every call to `job.finished()`
+		);
+	}
+
 	constructor(private activeExecutions: ActiveExecutions) {}
 
 	async init() {
-		const prefix = getRedisPrefix();
-		const clusterNodes = getRedisClusterNodes();
-		const usesRedisCluster = clusterNodes.length > 0;
-		const { host, port, username, password, db }: RedisOptions = config.getEnv('queue.bull.redis');
-		// eslint-disable-next-line @typescript-eslint/naming-convention
 		const { default: Bull } = await import('bull');
-		// eslint-disable-next-line @typescript-eslint/naming-convention
-		const { default: Redis } = await import('ioredis');
-		// Disabling ready check is necessary as it allows worker to
-		// quickly reconnect to Redis if Redis crashes or is unreachable
-		// for some time. With it enabled, worker might take minutes to realize
-		// redis is back up and resume working.
-		// More here: https://github.com/OptimalBits/bull/issues/890
+		const { RedisClientService } = await import('@/services/redis/redis-client.service');
 
-		LoggerProxy.debug(
-			usesRedisCluster
-				? `Initialising Redis cluster connection with nodes: ${clusterNodes
-						.map((e) => `${e.host}:${e.port}`)
-						.join(',')}`
-				: `Initialising Redis client connection with host: ${host ?? 'localhost'} and port: ${
-						port ?? '6379'
-				  }`,
-		);
-		const sharedRedisOptions: RedisOptions = {
-			username,
-			password,
-			db,
-			enableReadyCheck: false,
-			maxRetriesPerRequest: null,
-		};
+		const redisClientService = Container.get(RedisClientService);
+
+		const bullPrefix = config.getEnv('queue.bull.prefix');
+		const prefix = redisClientService.toValidPrefix(bullPrefix);
+
 		this.jobQueue = new Bull('jobs', {
 			prefix,
-			createClient: (type, clientConfig) =>
-				usesRedisCluster
-					? new Redis.Cluster(
-							clusterNodes.map((node) => ({ host: node.host, port: node.port })),
-							{
-								...clientConfig,
-								redisOptions: sharedRedisOptions,
-							},
-					  )
-					: new Redis({
-							...clientConfig,
-							host,
-							port,
-							...sharedRedisOptions,
-					  }),
+			settings: config.get('queue.bull.settings'),
+			createClient: (type) => redisClientService.createClient({ type: `${type}(bull)` }),
 		});
 
-		this.jobQueue.on('global:progress', (jobId, progress: WebhookResponse) => {
+		this.jobQueue.on('global:progress', (_jobId, progress: WebhookResponse) => {
 			this.activeExecutions.resolveResponsePromise(
-				// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
 				progress.executionId,
-				WebhookHelpers.decodeWebhookResponse(progress.response),
+				this.decodeWebhookResponse(progress.response),
 			);
 		});
 	}
 
+	async findRunningJobBy({ executionId }: { executionId: string }) {
+		const activeOrWaitingJobs = await this.getJobs(['active', 'waiting']);
+
+		return activeOrWaitingJobs.find(({ data }) => data.executionId === executionId) ?? null;
+	}
+
+	decodeWebhookResponse(response: IExecuteResponsePromiseData): IExecuteResponsePromiseData {
+		if (
+			typeof response === 'object' &&
+			typeof response.body === 'object' &&
+			(response.body as IDataObject)['__@N8nEncodedBuffer@__']
+		) {
+			response.body = Buffer.from(
+				(response.body as IDataObject)['__@N8nEncodedBuffer@__'] as string,
+				BINARY_ENCODING,
+			);
+		}
+
+		return response;
+	}
+
 	async add(jobData: JobData, jobOptions: object): Promise<Job> {
-		return this.jobQueue.add(jobData, jobOptions);
+		return await this.jobQueue.add(jobData, jobOptions);
 	}
 
 	async getJob(jobId: JobId): Promise<Job | null> {
-		return this.jobQueue.getJob(jobId);
+		return await this.jobQueue.getJob(jobId);
 	}
 
 	async getJobs(jobTypes: Bull.JobStatus[]): Promise<Job[]> {
-		return this.jobQueue.getJobs(jobTypes);
+		return await this.jobQueue.getJobs(jobTypes);
+	}
+
+	/**
+	 * Get IDs of executions that are currently in progress in the queue.
+	 */
+	async getInProgressExecutionIds() {
+		const inProgressJobs = await this.getJobs(['active', 'waiting']);
+
+		return new Set(inProgressJobs.map((job) => job.data.executionId));
+	}
+
+	async process(fn: Bull.ProcessCallbackFunction<JobData>): Promise<void> {
+		return await this.jobQueue.process(this.concurrency, fn);
+	}
+
+	async ping(): Promise<string> {
+		return await this.jobQueue.client.ping();
+	}
+
+	@OnShutdown(HIGHEST_SHUTDOWN_PRIORITY)
+	// Stop accepting new jobs, `doNotWaitActive` allows reporting progress
+	async pause(): Promise<void> {
+		return await this.jobQueue?.pause(true, true);
 	}
 
 	getBullObjectInstance(): JobQueue {
+		if (this.jobQueue === undefined) {
+			// if queue is not initialized yet throw an error, since we do not want to hand around an undefined queue
+			throw new ApplicationError('Queue is not initialized yet!');
+		}
 		return this.jobQueue;
 	}
 

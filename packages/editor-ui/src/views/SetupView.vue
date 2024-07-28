@@ -1,7 +1,7 @@
 <template>
 	<AuthView
 		:form="FORM_CONFIG"
-		:formLoading="loading"
+		:form-loading="loading"
 		data-test-id="setup-form"
 		@submit="onSubmit"
 	/>
@@ -11,7 +11,7 @@
 import AuthView from './AuthView.vue';
 import { defineComponent } from 'vue';
 
-import { useToast } from '@/composables';
+import { useToast } from '@/composables/useToast';
 import type { IFormBoxConfig } from '@/Interface';
 import { VIEWS } from '@/constants';
 import { mapStores } from 'pinia';
@@ -109,7 +109,7 @@ export default defineComponent({
 				}
 
 				if (forceRedirectedHere) {
-					await this.$router.push({ name: VIEWS.NEW_WORKFLOW });
+					await this.$router.push({ name: VIEWS.HOMEPAGE });
 				} else {
 					await this.$router.push({ name: VIEWS.USERS_SETTINGS });
 				}

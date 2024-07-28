@@ -1,32 +1,27 @@
 <script lang="ts" setup>
 import Modal from './Modal.vue';
 import { SOURCE_CONTROL_PULL_MODAL_KEY } from '@/constants';
-import type { PropType } from 'vue';
 import type { EventBus } from 'n8n-design-system/utils';
 import type { SourceControlAggregatedFile } from '@/Interface';
-import { useI18n, useLoadingService, useToast } from '@/composables';
+import { useI18n } from '@/composables/useI18n';
+import { useLoadingService } from '@/composables/useLoadingService';
+import { useToast } from '@/composables/useToast';
 import { useSourceControlStore } from '@/stores/sourceControl.store';
-import { useUIStore } from '@/stores';
-import { useRoute, useRouter } from 'vue-router/composables';
+import { useUIStore } from '@/stores/ui.store';
 import { computed, nextTick, ref } from 'vue';
 import { sourceControlEventBus } from '@/event-bus/source-control';
 
-const props = defineProps({
-	data: {
-		type: Object as PropType<{ eventBus: EventBus; status: SourceControlAggregatedFile[] }>,
-		default: () => ({}),
-	},
-});
+const props = defineProps<{
+	data: { eventBus: EventBus; status: SourceControlAggregatedFile[] };
+}>();
 
 const incompleteFileTypes = ['variables', 'credential'];
 
 const loadingService = useLoadingService();
 const uiStore = useUIStore();
 const toast = useToast();
-const { i18n } = useI18n();
+const i18n = useI18n();
 const sourceControlStore = useSourceControlStore();
-const router = useRouter();
-const route = useRoute();
 
 const files = ref<SourceControlAggregatedFile[]>(props.data.status || []);
 
@@ -36,10 +31,6 @@ const workflowFiles = computed(() => {
 
 const modifiedWorkflowFiles = computed(() => {
 	return workflowFiles.value.filter((file) => file.status === 'modified');
-});
-
-const deletedWorkflowFiles = computed(() => {
-	return workflowFiles.value.filter((file) => file.status === 'deleted');
 });
 
 function close() {
@@ -63,7 +54,7 @@ async function pullWorkfolder() {
 		});
 
 		if (hasVariablesOrCredentials) {
-			nextTick(() => {
+			void nextTick(() => {
 				toast.showMessage({
 					message: i18n.baseText('settings.sourceControl.pull.oneLastStep.description'),
 					title: i18n.baseText('settings.sourceControl.pull.oneLastStep.title'),
@@ -87,7 +78,7 @@ async function pullWorkfolder() {
 	<Modal
 		width="500px"
 		:title="i18n.baseText('settings.sourceControl.modals.pull.title')"
-		:eventBus="data.eventBus"
+		:event-bus="data.eventBus"
 		:name="SOURCE_CONTROL_PULL_MODAL_KEY"
 	>
 		<template #content>

@@ -9,17 +9,16 @@ import {
 } from '@/environments/sourceControl/sourceControlHelper.ee';
 import { License } from '@/License';
 import { SourceControlPreferencesService } from '@/environments/sourceControl/sourceControlPreferences.service.ee';
-import { UserSettings } from 'n8n-core';
+import { InstanceSettings } from 'n8n-core';
 import path from 'path';
 import {
 	SOURCE_CONTROL_SSH_FOLDER,
 	SOURCE_CONTROL_GIT_FOLDER,
-	SOURCE_CONTROL_SSH_KEY_NAME,
 } from '@/environments/sourceControl/constants';
-import { LoggerProxy } from 'n8n-workflow';
-import { getLogger } from '@/Logger';
 import { constants as fsConstants, accessSync } from 'fs';
 import type { SourceControlledFile } from '@/environments/sourceControl/types/sourceControlledFile';
+import type { SourceControlPreferences } from '@/environments/sourceControl/types/sourceControlPreferences';
+import { mockInstance } from '../shared/mocking';
 
 const pushResult: SourceControlledFile[] = [
 	{
@@ -151,9 +150,11 @@ const pullResult: SourceControlledFile[] = [
 	},
 ];
 
+const license = mockInstance(License);
+
 beforeAll(async () => {
-	LoggerProxy.init(getLogger());
-	Container.get(License).isSourceControlLicensed = () => true;
+	jest.resetAllMocks();
+	license.isSourceControlLicensed.mockReturnValue(true);
 	Container.get(SourceControlPreferencesService).getPreferences = () => ({
 		branchName: 'main',
 		connected: true,
@@ -167,18 +168,25 @@ beforeAll(async () => {
 
 describe('Source Control', () => {
 	it('should generate an SSH key pair', async () => {
-		const keyPair = await generateSshKeyPair();
+		const keyPair = await generateSshKeyPair('ed25519');
 		expect(keyPair.privateKey).toBeTruthy();
 		expect(keyPair.privateKey).toContain('BEGIN OPENSSH PRIVATE KEY');
 		expect(keyPair.publicKey).toBeTruthy();
 		expect(keyPair.publicKey).toContain('ssh-ed25519');
 	});
 
+	it('should generate an RSA key pair', async () => {
+		const keyPair = await generateSshKeyPair('rsa');
+		expect(keyPair.privateKey).toBeTruthy();
+		expect(keyPair.privateKey).toContain('BEGIN OPENSSH PRIVATE KEY');
+		expect(keyPair.publicKey).toBeTruthy();
+		expect(keyPair.publicKey).toContain('ssh-rsa');
+	});
+
 	it('should check for git and ssh folders and create them if required', async () => {
-		const userFolder = UserSettings.getUserN8nFolderPath();
-		const sshFolder = path.join(userFolder, SOURCE_CONTROL_SSH_FOLDER);
-		const gitFolder = path.join(userFolder, SOURCE_CONTROL_GIT_FOLDER);
-		const sshKeyName = path.join(sshFolder, SOURCE_CONTROL_SSH_KEY_NAME);
+		const { n8nFolder } = Container.get(InstanceSettings);
+		const sshFolder = path.join(n8nFolder, SOURCE_CONTROL_SSH_FOLDER);
+		const gitFolder = path.join(n8nFolder, SOURCE_CONTROL_GIT_FOLDER);
 		let hasThrown = false;
 		try {
 			accessSync(sshFolder, fsConstants.F_OK);
@@ -201,10 +209,6 @@ describe('Source Control', () => {
 		expect(accessSync(gitFolder, fsConstants.F_OK)).toBeUndefined();
 	});
 
-	it('should check if source control is licensed', async () => {
-		expect(Container.get(License).isSourceControlLicensed()).toBe(true);
-	});
-
 	it('should get repo type from url', async () => {
 		expect(getRepoType('git@github.com:n8ntest/n8n_testrepo.git')).toBe('github');
 		expect(getRepoType('git@gitlab.com:n8ntest/n8n_testrepo.git')).toBe('gitlab');
@@ -214,35 +218,35 @@ describe('Source Control', () => {
 	it('should get tracking information from pre-push results', () => {
 		const trackingResult = getTrackingInformationFromPrePushResult(pushResult);
 		expect(trackingResult).toEqual({
-			workflows_eligible: 3,
-			workflows_eligible_with_conflicts: 1,
-			creds_eligible: 1,
-			creds_eligible_with_conflicts: 0,
-			variables_eligible: 1,
+			workflowsEligible: 3,
+			workflowsEligibleWithConflicts: 1,
+			credsEligible: 1,
+			credsEligibleWithConflicts: 0,
+			variablesEligible: 1,
 		});
 	});
 
 	it('should get tracking information from post-push results', () => {
 		const trackingResult = getTrackingInformationFromPostPushResult(pushResult);
 		expect(trackingResult).toEqual({
-			workflows_pushed: 2,
-			workflows_eligible: 3,
-			creds_pushed: 1,
-			variables_pushed: 1,
+			workflowsPushed: 2,
+			workflowsEligible: 3,
+			credsPushed: 1,
+			variablesPushed: 1,
 		});
 	});
 
 	it('should get tracking information from pull results', () => {
 		const trackingResult = getTrackingInformationFromPullResult(pullResult);
 		expect(trackingResult).toEqual({
-			cred_conflicts: 1,
-			workflow_conflicts: 1,
-			workflow_updates: 3,
+			credConflicts: 1,
+			workflowConflicts: 1,
+			workflowUpdates: 3,
 		});
 	});
 
 	it('should class validate correct preferences', async () => {
-		const validPreferences = {
+		const validPreferences: Partial<SourceControlPreferences> = {
 			branchName: 'main',
 			repositoryUrl: 'git@example.com:n8ntest/n8n_testrepo.git',
 			branchReadOnly: false,

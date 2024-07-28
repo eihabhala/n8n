@@ -1,9 +1,8 @@
 <template>
-	<div v-if="dialogVisible" @keydown.stop>
+	<div v-if="dialogVisible" class="expression-edit" @keydown.stop>
 		<el-dialog
-			:visible="dialogVisible"
-			custom-class="expression-dialog classic"
-			append-to-body
+			:model-value="dialogVisible"
+			class="expression-dialog classic"
 			width="80%"
 			:title="$locale.baseText('expressionEdit.editExpression')"
 			:before-close="closeDialog"
@@ -20,11 +19,11 @@
 					</div>
 
 					<div class="variable-selector">
-						<variable-selector
+						<VariableSelector
 							:path="path"
-							:redactValues="redactValues"
-							@itemSelected="itemSelected"
-						></variable-selector>
+							:redact-values="redactValues"
+							@item-selected="itemSelected"
+						></VariableSelector>
 					</div>
 				</el-col>
 				<el-col :span="16" class="right-side">
@@ -41,6 +40,7 @@
 								<span>
 									{{ $locale.baseText('expressionEdit.isJavaScript') }}
 								</span>
+								{{ ' ' }}
 								<n8n-link size="medium" :to="expressionsDocsUrl">
 									{{ $locale.baseText('expressionEdit.learnMore') }}
 								</n8n-link>
@@ -48,14 +48,14 @@
 						</div>
 						<div class="expression-editor">
 							<ExpressionEditorModalInput
-								:value="value"
-								:isReadOnly="isReadOnlyRoute"
+								ref="inputFieldExpression"
+								:model-value="modelValue"
+								:is-read-only="isReadOnly"
 								:path="path"
 								:class="{ 'ph-no-capture': redactValues }"
+								data-test-id="expression-modal-input"
 								@change="valueChanged"
 								@close="closeDialog"
-								ref="inputFieldExpression"
-								data-test-id="expression-modal-input"
 							/>
 						</div>
 					</div>
@@ -65,9 +65,10 @@
 							{{ $locale.baseText('expressionEdit.resultOfItem1') }}
 						</div>
 						<div :class="{ 'ph-no-capture': redactValues }">
-							<ExpressionEditorModalOutput
-								:segments="segments"
+							<ExpressionOutput
 								ref="expressionResult"
+								:segments="segments"
+								:extensions="theme"
 								data-test-id="expression-modal-output"
 							/>
 						</div>
@@ -79,34 +80,71 @@
 </template>
 
 <script lang="ts">
-import { defineComponent } from 'vue';
+import { type PropType, defineComponent } from 'vue';
 import { mapStores } from 'pinia';
 import ExpressionEditorModalInput from '@/components/ExpressionEditorModal/ExpressionEditorModalInput.vue';
-import ExpressionEditorModalOutput from '@/components/ExpressionEditorModal/ExpressionEditorModalOutput.vue';
 import VariableSelector from '@/components/VariableSelector.vue';
 
 import type { IVariableItemSelected } from '@/Interface';
 
-import { externalHooks } from '@/mixins/externalHooks';
-import { genericHelpers } from '@/mixins/genericHelpers';
-
 import { EXPRESSIONS_DOCS_URL } from '@/constants';
 
-import { debounceHelper } from '@/mixins/debounce';
 import { useWorkflowsStore } from '@/stores/workflows.store';
 import { useNDVStore } from '@/stores/ndv.store';
+import { useExternalHooks } from '@/composables/useExternalHooks';
 import { createExpressionTelemetryPayload } from '@/utils/telemetryUtils';
+import { useDebounce } from '@/composables/useDebounce';
 
 import type { Segment } from '@/types/expressions';
+import ExpressionOutput from './InlineExpressionEditor/ExpressionOutput.vue';
+import { outputTheme } from './ExpressionEditorModal/theme';
+import type { INodeProperties } from 'n8n-workflow';
 
 export default defineComponent({
 	name: 'ExpressionEdit',
-	mixins: [externalHooks, genericHelpers, debounceHelper],
-	props: ['dialogVisible', 'parameter', 'path', 'value', 'eventSource', 'redactValues'],
 	components: {
 		ExpressionEditorModalInput,
-		ExpressionEditorModalOutput,
+		ExpressionOutput,
 		VariableSelector,
+	},
+	props: {
+		dialogVisible: {
+			type: Boolean,
+			default: false,
+		},
+		parameter: {
+			type: Object as PropType<INodeProperties>,
+			default: () => ({}),
+		},
+		path: {
+			type: String,
+			default: '',
+		},
+		modelValue: {
+			type: String,
+			default: '',
+		},
+		eventSource: {
+			type: String,
+			default: '',
+		},
+		redactValues: {
+			type: Boolean,
+			default: false,
+		},
+		isReadOnly: {
+			type: Boolean,
+			default: false,
+		},
+	},
+	setup() {
+		const externalHooks = useExternalHooks();
+		const { callDebounced } = useDebounce();
+
+		return {
+			callDebounced,
+			externalHooks,
+		};
 	},
 	data() {
 		return {
@@ -114,21 +152,52 @@ export default defineComponent({
 			latestValue: '',
 			segments: [] as Segment[],
 			expressionsDocsUrl: EXPRESSIONS_DOCS_URL,
+			theme: outputTheme(),
 		};
 	},
 	computed: {
 		...mapStores(useNDVStore, useWorkflowsStore),
+	},
+	watch: {
+		dialogVisible(newValue) {
+			this.displayValue = this.modelValue;
+			this.latestValue = this.modelValue;
+
+			const resolvedExpressionValue =
+				(this.$refs.expressionResult as InstanceType<typeof ExpressionOutput>)?.getValue() || '';
+			void this.externalHooks.run('expressionEdit.dialogVisibleChanged', {
+				dialogVisible: newValue,
+				parameter: this.parameter,
+				value: this.modelValue,
+				resolvedExpressionValue,
+			});
+
+			if (!newValue) {
+				const telemetryPayload = createExpressionTelemetryPayload(
+					this.segments,
+					this.modelValue,
+					this.workflowsStore.workflowId,
+					this.ndvStore.pushRef,
+					this.ndvStore.activeNode?.type ?? '',
+				);
+
+				this.$telemetry.track('User closed Expression Editor', telemetryPayload);
+				void this.externalHooks.run('expressionEdit.closeDialog', telemetryPayload);
+			}
+		},
 	},
 	methods: {
 		valueChanged({ value, segments }: { value: string; segments: Segment[] }, forceUpdate = false) {
 			this.latestValue = value;
 			this.segments = segments;
 
-			if (forceUpdate === true) {
+			if (forceUpdate) {
 				this.updateDisplayValue();
-				this.$emit('valueChanged', this.latestValue);
+				this.$emit('update:modelValue', this.latestValue);
 			} else {
-				void this.callDebounced('updateDisplayValue', { debounceTime: 500 });
+				void this.callDebounced(this.updateDisplayValue, {
+					debounceTime: 500,
+				});
 			}
 		},
 
@@ -137,21 +206,24 @@ export default defineComponent({
 		},
 
 		closeDialog() {
-			if (this.latestValue !== this.value) {
+			if (this.latestValue !== this.modelValue) {
 				// Handle the close externally as the visible parameter is an external prop
 				// and is so not allowed to be changed here.
-				this.$emit('valueChanged', this.latestValue);
+				this.$emit('update:modelValue', this.latestValue);
 			}
 			this.$emit('closeDialog');
 			return false;
 		},
 
 		itemSelected(eventData: IVariableItemSelected) {
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
-			(this.$refs.inputFieldExpression as any).itemSelected(eventData);
-			void this.$externalHooks().run('expressionEdit.itemSelected', {
+			(
+				this.$refs.inputFieldExpression as {
+					itemSelected: (variable: IVariableItemSelected) => void;
+				}
+			).itemSelected(eventData);
+			void this.externalHooks.run('expressionEdit.itemSelected', {
 				parameter: this.parameter,
-				value: this.value,
+				value: this.modelValue,
 				selectedItem: eventData,
 			});
 
@@ -219,40 +291,32 @@ export default defineComponent({
 			);
 		},
 	},
-	watch: {
-		dialogVisible(newValue) {
-			this.displayValue = this.value;
-			this.latestValue = this.value;
-
-			const resolvedExpressionValue =
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
-				(this.$refs.expressionResult && (this.$refs.expressionResult as any).getValue()) ||
-				undefined;
-			void this.$externalHooks().run('expressionEdit.dialogVisibleChanged', {
-				dialogVisible: newValue,
-				parameter: this.parameter,
-				value: this.value,
-				resolvedExpressionValue,
-			});
-
-			if (!newValue) {
-				const telemetryPayload = createExpressionTelemetryPayload(
-					this.segments,
-					this.value,
-					this.workflowsStore.workflowId,
-					this.ndvStore.sessionId,
-					this.ndvStore.activeNode?.type ?? '',
-				);
-
-				this.$telemetry.track('User closed Expression Editor', telemetryPayload);
-				void this.$externalHooks().run('expressionEdit.closeDialog', telemetryPayload);
-			}
-		},
-	},
 });
 </script>
 
 <style scoped lang="scss">
+.expression-edit {
+	:deep(.expression-dialog) {
+		.el-dialog__header {
+			padding: 0;
+		}
+		.el-dialog__title {
+			display: none;
+		}
+
+		.el-dialog__body {
+			padding: 0;
+			font-size: var(--font-size-s);
+		}
+
+		.right-side {
+			background-color: var(--color-background-light);
+			border-top-right-radius: 8px;
+			border-bottom-right-radius: 8px;
+		}
+	}
+}
+
 .editor-description {
 	line-height: 1.5;
 	font-weight: bold;
@@ -293,28 +357,8 @@ export default defineComponent({
 	margin-top: 1em;
 }
 
-::v-deep .expression-dialog {
-	.el-dialog__header {
-		padding: 0;
-	}
-	.el-dialog__title {
-		display: none;
-	}
-
-	.el-dialog__body {
-		padding: 0;
-		font-size: var(--font-size-s);
-	}
-
-	.right-side {
-		background-color: var(--color-background-light);
-		border-top-right-radius: 8px;
-		border-bottom-right-radius: 8px;
-	}
-}
-
 .header-side-menu {
-	padding: 1em 0 0.5em 1.8em;
+	padding: 1em 0 0.5em var(--spacing-s);
 	border-top-left-radius: 8px;
 
 	background-color: var(--color-background-base);
@@ -339,6 +383,6 @@ export default defineComponent({
 }
 
 .variable-selector {
-	margin: 0 1em;
+	margin: 0 var(--spacing-s);
 }
 </style>

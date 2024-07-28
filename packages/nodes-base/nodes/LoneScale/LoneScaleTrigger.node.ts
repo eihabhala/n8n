@@ -15,7 +15,7 @@ export class LoneScaleTrigger implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'LoneScale Trigger',
 		name: 'loneScaleTrigger',
-		icon: 'file:lonescale-logo.svg',
+		icon: { light: 'file:loneScale.svg', dark: 'file:loneScale.dark.svg' },
 		group: ['trigger'],
 		version: 1,
 		description: 'Trigger LoneScale Workflow',
@@ -124,7 +124,6 @@ export class LoneScaleTrigger implements INodeType {
 		const req = this.getRequestObject();
 
 		return {
-			// eslint-disable-next-line @typescript-eslint/no-unsafe-argument
 			workflowData: [this.helpers.returnJsonArray(req.body)],
 		};
 	}

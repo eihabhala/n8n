@@ -17,10 +17,13 @@ describe('components', () => {
 						},
 					],
 				},
-				stubs: ['n8n-icon', 'el-dropdown', 'el-dropdown-menu', 'el-dropdown-item'],
+				global: {
+					stubs: ['n8n-icon', 'el-tooltip', 'el-dropdown', 'el-dropdown-menu', 'el-dropdown-item'],
+				},
 			});
 			expect(wrapper.html()).toMatchSnapshot();
 		});
+
 		it('should render custom styling correctly', () => {
 			const wrapper = render(N8nActionDropdown, {
 				props: {
@@ -44,7 +47,9 @@ describe('components', () => {
 						},
 					],
 				},
-				stubs: ['n8n-icon', 'el-dropdown', 'el-dropdown-menu', 'el-dropdown-item'],
+				global: {
+					stubs: ['n8n-icon', 'el-dropdown', 'el-dropdown-menu', 'el-dropdown-item'],
+				},
 			});
 			expect(wrapper.html()).toMatchSnapshot();
 		});

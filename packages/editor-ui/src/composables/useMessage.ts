@@ -1,70 +1,86 @@
-import type { ElMessageBoxOptions } from 'element-ui/types/message-box';
-import { Message, MessageBox } from 'element-ui';
+import type { ElMessageBoxOptions, Action, MessageBoxInputData } from 'element-plus';
+import { ElMessageBox as MessageBox } from 'element-plus';
+
+export type MessageBoxConfirmResult = 'confirm' | 'cancel';
 
 export function useMessage() {
-	const handleCancelOrClose = (e: unknown) => {
+	const handleCancelOrClose = (e: Action | Error): Action => {
 		if (e instanceof Error) throw e;
-		else return e;
+
+		return e;
+	};
+
+	const handleCancelOrClosePrompt = (e: Error | Action): MessageBoxInputData => {
+		if (e instanceof Error) throw e;
+
+		return { value: '', action: e };
 	};
 
 	async function alert(
-		message: string,
+		message: ElMessageBoxOptions['message'],
 		configOrTitle?: string | ElMessageBoxOptions,
 		config?: ElMessageBoxOptions,
 	) {
 		const resolvedConfig = {
-			...(config || (typeof configOrTitle === 'object' ? configOrTitle : {})),
+			...(config ?? (typeof configOrTitle === 'object' ? configOrTitle : {})),
 			cancelButtonClass: 'btn--cancel',
 			confirmButtonClass: 'btn--confirm',
 		};
 
 		if (typeof configOrTitle === 'string') {
-			return MessageBox.alert(message, configOrTitle, resolvedConfig).catch(handleCancelOrClose);
+			return await MessageBox.alert(message, configOrTitle, resolvedConfig).catch(
+				handleCancelOrClose,
+			);
 		}
-		return MessageBox.alert(message, resolvedConfig).catch(handleCancelOrClose);
+		return await MessageBox.alert(message, resolvedConfig).catch(handleCancelOrClose);
 	}
 
 	async function confirm(
-		message: string,
+		message: ElMessageBoxOptions['message'],
 		configOrTitle?: string | ElMessageBoxOptions,
 		config?: ElMessageBoxOptions,
 	) {
 		const resolvedConfig = {
-			...(config || (typeof configOrTitle === 'object' ? configOrTitle : {})),
 			cancelButtonClass: 'btn--cancel',
 			confirmButtonClass: 'btn--confirm',
 			distinguishCancelAndClose: true,
-			showClose: config?.showClose || false,
+			showClose: config?.showClose ?? false,
 			closeOnClickModal: false,
+			...(config ?? (typeof configOrTitle === 'object' ? configOrTitle : {})),
 		};
 
 		if (typeof configOrTitle === 'string') {
-			return MessageBox.confirm(message, configOrTitle, resolvedConfig).catch(handleCancelOrClose);
+			return await MessageBox.confirm(message, configOrTitle, resolvedConfig).catch(
+				handleCancelOrClose,
+			);
 		}
-		return MessageBox.confirm(message, resolvedConfig).catch(handleCancelOrClose);
+
+		return await MessageBox.confirm(message, resolvedConfig).catch(handleCancelOrClose);
 	}
 
 	async function prompt(
-		message: string,
+		message: ElMessageBoxOptions['message'],
 		configOrTitle?: string | ElMessageBoxOptions,
 		config?: ElMessageBoxOptions,
 	) {
 		const resolvedConfig = {
-			...(config || (typeof configOrTitle === 'object' ? configOrTitle : {})),
+			...(config ?? (typeof configOrTitle === 'object' ? configOrTitle : {})),
 			cancelButtonClass: 'btn--cancel',
 			confirmButtonClass: 'btn--confirm',
 		};
 
 		if (typeof configOrTitle === 'string') {
-			return MessageBox.prompt(message, configOrTitle, resolvedConfig).catch(handleCancelOrClose);
+			return await MessageBox.prompt(message, configOrTitle, resolvedConfig).catch(
+				handleCancelOrClosePrompt,
+			);
 		}
-		return MessageBox.prompt(message, resolvedConfig).catch(handleCancelOrClose);
+		return await MessageBox.prompt(message, resolvedConfig).catch(handleCancelOrClosePrompt);
 	}
 
 	return {
 		alert,
 		confirm,
 		prompt,
-		message: Message,
+		message: MessageBox,
 	};
 }

@@ -1,9 +1,8 @@
-import Container from 'typedi';
+import { Container } from 'typedi';
 import { License } from '@/License';
 import { generateKeyPairSync } from 'crypto';
 import type { KeyPair } from './types/keyPair';
 import { constants as fsConstants, mkdirSync, accessSync } from 'fs';
-import { LoggerProxy } from 'n8n-workflow';
 import {
 	SOURCE_CONTROL_GIT_KEY_COMMENT,
 	SOURCE_CONTROL_TAGS_EXPORT_FILE,
@@ -11,6 +10,8 @@ import {
 } from './constants';
 import type { SourceControlledFile } from './types/sourceControlledFile';
 import path from 'path';
+import type { KeyPairType } from './types/keyPairType';
+import { Logger } from '@/Logger';
 
 export function stringContainsExpression(testString: string): boolean {
 	return /^=.*\{\{.*\}\}/.test(testString);
@@ -50,7 +51,7 @@ export function sourceControlFoldersExistCheck(
 				try {
 					mkdirSync(folder, { recursive: true });
 				} catch (error) {
-					LoggerProxy.error((error as Error).message);
+					Container.get(Logger).error((error as Error).message);
 				}
 			}
 		}
@@ -63,7 +64,7 @@ export function isSourceControlLicensed() {
 	return license.isSourceControlLicensed();
 }
 
-export async function generateSshKeyPair(keyType: 'ed25519' | 'rsa' = 'ed25519') {
+export async function generateSshKeyPair(keyType: KeyPairType) {
 	const sshpk = await import('sshpk');
 	const keyPair: KeyPair = {
 		publicKey: '',
@@ -120,58 +121,43 @@ function filterSourceControlledFilesUniqueIds(files: SourceControlledFile[]) {
 	);
 }
 
-export function getTrackingInformationFromPullResult(result: SourceControlledFile[]): {
-	cred_conflicts: number;
-	workflow_conflicts: number;
-	workflow_updates: number;
-} {
+export function getTrackingInformationFromPullResult(result: SourceControlledFile[]) {
 	const uniques = filterSourceControlledFilesUniqueIds(result);
 	return {
-		cred_conflicts: uniques.filter(
+		credConflicts: uniques.filter(
 			(file) =>
 				file.type === 'credential' && file.status === 'modified' && file.location === 'local',
 		).length,
-		workflow_conflicts: uniques.filter(
+		workflowConflicts: uniques.filter(
 			(file) => file.type === 'workflow' && file.status === 'modified' && file.location === 'local',
 		).length,
-		workflow_updates: uniques.filter((file) => file.type === 'workflow').length,
+		workflowUpdates: uniques.filter((file) => file.type === 'workflow').length,
 	};
 }
 
-export function getTrackingInformationFromPrePushResult(result: SourceControlledFile[]): {
-	workflows_eligible: number;
-	workflows_eligible_with_conflicts: number;
-	creds_eligible: number;
-	creds_eligible_with_conflicts: number;
-	variables_eligible: number;
-} {
+export function getTrackingInformationFromPrePushResult(result: SourceControlledFile[]) {
 	const uniques = filterSourceControlledFilesUniqueIds(result);
 	return {
-		workflows_eligible: uniques.filter((file) => file.type === 'workflow').length,
-		workflows_eligible_with_conflicts: uniques.filter(
+		workflowsEligible: uniques.filter((file) => file.type === 'workflow').length,
+		workflowsEligibleWithConflicts: uniques.filter(
 			(file) => file.type === 'workflow' && file.conflict,
 		).length,
-		creds_eligible: uniques.filter((file) => file.type === 'credential').length,
-		creds_eligible_with_conflicts: uniques.filter(
+		credsEligible: uniques.filter((file) => file.type === 'credential').length,
+		credsEligibleWithConflicts: uniques.filter(
 			(file) => file.type === 'credential' && file.conflict,
 		).length,
-		variables_eligible: uniques.filter((file) => file.type === 'variables').length,
+		variablesEligible: uniques.filter((file) => file.type === 'variables').length,
 	};
 }
 
-export function getTrackingInformationFromPostPushResult(result: SourceControlledFile[]): {
-	workflows_eligible: number;
-	workflows_pushed: number;
-	creds_pushed: number;
-	variables_pushed: number;
-} {
+export function getTrackingInformationFromPostPushResult(result: SourceControlledFile[]) {
 	const uniques = filterSourceControlledFilesUniqueIds(result);
 	return {
-		workflows_pushed: uniques.filter((file) => file.pushed && file.type === 'workflow').length ?? 0,
-		workflows_eligible: uniques.filter((file) => file.type === 'workflow').length ?? 0,
-		creds_pushed:
+		workflowsPushed: uniques.filter((file) => file.pushed && file.type === 'workflow').length ?? 0,
+		workflowsEligible: uniques.filter((file) => file.type === 'workflow').length ?? 0,
+		credsPushed:
 			uniques.filter((file) => file.pushed && file.file.startsWith('credential_stubs')).length ?? 0,
-		variables_pushed:
+		variablesPushed:
 			uniques.filter((file) => file.pushed && file.file.startsWith('variable_stubs')).length ?? 0,
 	};
 }

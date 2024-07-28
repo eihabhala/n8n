@@ -1,5 +1,10 @@
-export class WebhookAuthorizationError extends Error {
-	constructor(readonly responseCode: number, message?: string) {
+import { ApplicationError } from 'n8n-workflow';
+
+export class WebhookAuthorizationError extends ApplicationError {
+	constructor(
+		readonly responseCode: number,
+		message?: string,
+	) {
 		if (message === undefined) {
 			message = 'Authorization problem!';
 			if (responseCode === 401) {

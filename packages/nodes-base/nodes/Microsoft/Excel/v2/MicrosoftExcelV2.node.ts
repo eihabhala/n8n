@@ -1,4 +1,3 @@
-/* eslint-disable n8n-nodes-base/node-filename-against-convention */
 import type {
 	IExecuteFunctions,
 	INodeType,
@@ -23,6 +22,6 @@ export class MicrosoftExcelV2 implements INodeType {
 	methods = { listSearch, loadOptions };
 
 	async execute(this: IExecuteFunctions) {
-		return router.call(this);
+		return await router.call(this);
 	}
 }

@@ -1,14 +1,17 @@
-import * as Db from '@/Db';
+import { Container } from 'typedi';
+
+import { TagRepository } from '@db/repositories/tag.repository';
+
 import * as utils from './shared/utils/';
 import * as testDb from './shared/testDb';
-import type { SuperAgentTest } from 'supertest';
+import type { SuperAgentTest } from './shared/types';
+import { createUserShell } from './shared/db/users';
 
 let authOwnerAgent: SuperAgentTest;
 const testServer = utils.setupTestServer({ endpointGroups: ['tags'] });
 
 beforeAll(async () => {
-	const globalOwnerRole = await testDb.getGlobalOwnerRole();
-	const ownerShell = await testDb.createUserShell(globalOwnerRole);
+	const ownerShell = await createUserShell('global:owner');
 	authOwnerAgent = testServer.authAgentFor(ownerShell);
 });
 
@@ -21,18 +24,18 @@ describe('POST /tags', () => {
 		const resp = await authOwnerAgent.post('/tags').send({ name: 'test' });
 		expect(resp.statusCode).toBe(200);
 
-		const dbTag = await Db.collections.Tag.findBy({ name: 'test' });
+		const dbTag = await Container.get(TagRepository).findBy({ name: 'test' });
 		expect(dbTag.length === 1);
 	});
 
 	test('should not create duplicate tag', async () => {
-		const newTag = Db.collections.Tag.create({ name: 'test' });
-		await Db.collections.Tag.save(newTag);
+		const newTag = Container.get(TagRepository).create({ name: 'test' });
+		await Container.get(TagRepository).save(newTag);
 
 		const resp = await authOwnerAgent.post('/tags').send({ name: 'test' });
 		expect(resp.status).toBe(500);
 
-		const dbTag = await Db.collections.Tag.findBy({ name: 'test' });
+		const dbTag = await Container.get(TagRepository).findBy({ name: 'test' });
 		expect(dbTag.length).toBe(1);
 	});
 });

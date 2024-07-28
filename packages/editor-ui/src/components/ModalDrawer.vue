@@ -1,21 +1,19 @@
 <template>
-	<el-drawer
+	<ElDrawer
 		:direction="direction"
-		:visible="uiStore.isModalOpen(this.name)"
+		:model-value="uiStore.modalsById[name].open"
 		:size="width"
 		:before-close="close"
 		:modal="modal"
-		:wrapperClosable="wrapperClosable"
+		:wrapper-closable="wrapperClosable"
 	>
-		<template #title>
+		<template #header>
 			<slot name="header" />
 		</template>
-		<template>
-			<span @keydown.stop>
-				<slot name="content" />
-			</span>
-		</template>
-	</el-drawer>
+		<span @keydown.stop>
+			<slot name="content" />
+		</span>
+	</ElDrawer>
 </template>
 
 <script lang="ts">
@@ -24,12 +22,17 @@ import { mapStores } from 'pinia';
 import { defineComponent } from 'vue';
 import type { PropType } from 'vue';
 import type { EventBus } from 'n8n-design-system';
+import { ElDrawer } from 'element-plus';
 
 export default defineComponent({
 	name: 'ModalDrawer',
+	components: {
+		ElDrawer,
+	},
 	props: {
 		name: {
 			type: String,
+			required: true,
 		},
 		beforeClose: {
 			type: Function,
@@ -38,7 +41,8 @@ export default defineComponent({
 			type: Object as PropType<EventBus>,
 		},
 		direction: {
-			type: String,
+			type: String as PropType<'ltr' | 'rtl' | 'ttb' | 'btt'>,
+			required: true,
 		},
 		modal: {
 			type: Boolean,
@@ -61,7 +65,7 @@ export default defineComponent({
 			activeElement.blur();
 		}
 	},
-	beforeDestroy() {
+	beforeUnmount() {
 		this.eventBus?.off('close', this.close);
 		window.removeEventListener('keydown', this.onWindowKeydown);
 	},
@@ -70,7 +74,7 @@ export default defineComponent({
 	},
 	methods: {
 		onWindowKeydown(event: KeyboardEvent) {
-			if (!this.uiStore.isModalActive(this.name)) {
+			if (!this.uiStore.isModalActiveById[this.name]) {
 				return;
 			}
 
@@ -79,7 +83,7 @@ export default defineComponent({
 			}
 		},
 		handleEnter() {
-			if (this.uiStore.isModalActive(this.name)) {
+			if (this.uiStore.isModalActiveById[this.name]) {
 				this.$emit('enter');
 			}
 		},

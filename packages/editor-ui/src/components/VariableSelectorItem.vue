@@ -2,7 +2,7 @@
 	<div class="item">
 		<div v-if="item.options" class="options">
 			<div v-if="item.options.length" class="headline clickable" @click="extended = !extended">
-				<div class="options-toggle" v-if="extendAll !== true">
+				<div v-if="extendAll !== true" class="options-toggle">
 					<font-awesome-icon v-if="extended" icon="angle-down" />
 					<font-awesome-icon v-else icon="angle-right" />
 				</div>
@@ -10,10 +10,10 @@
 					{{ item.name }}
 
 					<el-dropdown
+						v-if="allowParentSelect === true"
 						trigger="click"
 						@click.stop
 						@command="optionSelected($event, item)"
-						v-if="allowParentSelect === true"
 					>
 						<span class="el-dropdown-link clickable" @click.stop>
 							<font-awesome-icon
@@ -24,9 +24,9 @@
 						<template #dropdown>
 							<el-dropdown-menu>
 								<el-dropdown-item
-									:command="operation.command"
 									v-for="operation in itemAddOperations"
 									:key="operation.command"
+									:command="operation.command"
 									>{{ operation.displayName }}</el-dropdown-item
 								>
 							</el-dropdown-menu>
@@ -37,13 +37,13 @@
 			<div v-if="item.options && (extended === true || extendAll === true)">
 				<variable-selector-item
 					v-for="option in item.options"
-					:item="option"
 					:key="option.key"
-					:extendAll="extendAll"
-					:allowParentSelect="option.allowParentSelect"
-					:redactValues="redactValues"
+					:item="option"
+					:extend-all="extendAll"
+					:allow-parent-select="option.allowParentSelect"
+					:redact-values="redactValues"
 					class="sub-level"
-					@itemSelected="forwardItemSelected"
+					@item-selected="forwardItemSelected"
 				></variable-selector-item>
 			</div>
 		</div>
@@ -59,89 +59,89 @@
 	</div>
 </template>
 
-<script lang="ts">
-import { defineComponent } from 'vue';
+<script setup lang="ts">
+import { ref, computed, onMounted } from 'vue';
 import type { IVariableSelectorOption, IVariableItemSelected } from '@/Interface';
-import { externalHooks } from '@/mixins/externalHooks';
 
-export default defineComponent({
-	name: 'VariableSelectorItem',
-	mixins: [externalHooks],
-	props: ['allowParentSelect', 'extendAll', 'item', 'redactValues'],
-	mounted() {
-		if (this.extended) return;
+const props = defineProps<{
+	allowParentSelect?: boolean;
+	extendAll?: boolean;
+	item: IVariableSelectorOption;
+	redactValues?: boolean;
+}>();
 
-		const shouldAutoExtend =
-			[
-				this.$locale.baseText('variableSelectorItem.currentNode'),
-				this.$locale.baseText('variableSelectorItem.inputData'),
-				this.$locale.baseText('variableSelectorItem.binary'),
-				this.$locale.baseText('variableSelectorItem.json'),
-			].includes(this.item.name) && this.item.key === undefined;
+const emit = defineEmits<{
+	itemSelected: [value: IVariableItemSelected];
+}>();
 
-		if (shouldAutoExtend) {
-			this.extended = true;
-		}
-	},
-	computed: {
-		itemAddOperations() {
-			const returnOptions = [
-				{
-					command: 'raw',
-					displayName: 'Raw value',
-				},
-			];
-			if (this.item.dataType === 'array') {
-				returnOptions.push({
-					command: 'arrayLength',
-					displayName: 'Length',
-				});
-				returnOptions.push({
-					command: 'arrayValues',
-					displayName: 'Values',
-				});
-			} else if (this.item.dataType === 'object') {
-				returnOptions.push({
-					command: 'objectKeys',
-					displayName: 'Keys',
-				});
-				returnOptions.push({
-					command: 'objectValues',
-					displayName: 'Values',
-				});
-			}
+const extended = ref(false);
 
-			return returnOptions;
+const itemAddOperations = computed(() => {
+	const returnOptions = [
+		{
+			command: 'raw',
+			displayName: 'Raw value',
 		},
-	},
-	data() {
-		return {
-			extended: false,
-		};
-	},
-	methods: {
-		optionSelected(command: string, item: IVariableSelectorOption) {
-			// By default it is raw
-			let variable = item.key;
-			if (command === 'arrayValues') {
-				variable = `${item.key}.join(', ')`;
-			} else if (command === 'arrayLength') {
-				variable = `${item.key}.length`;
-			} else if (command === 'objectKeys') {
-				variable = `Object.keys(${item.key}).join(', ')`;
-			} else if (command === 'objectValues') {
-				variable = `Object.values(${item.key}).join(', ')`;
-			}
-			this.$emit('itemSelected', { variable });
-		},
-		selectItem(item: IVariableSelectorOption) {
-			this.$emit('itemSelected', { variable: item.key });
-		},
-		forwardItemSelected(eventData: IVariableItemSelected) {
-			this.$emit('itemSelected', eventData);
-		},
-	},
+	];
+	if (props.item.dataType === 'array') {
+		returnOptions.push(
+			{
+				command: 'arrayLength',
+				displayName: 'Length',
+			},
+			{
+				command: 'arrayValues',
+				displayName: 'Values',
+			},
+		);
+	} else if (props.item.dataType === 'object') {
+		returnOptions.push(
+			{
+				command: 'objectKeys',
+				displayName: 'Keys',
+			},
+			{
+				command: 'objectValues',
+				displayName: 'Values',
+			},
+		);
+	}
+	return returnOptions;
 });
+
+onMounted(() => {
+	if (extended.value) return;
+
+	const shouldAutoExtend =
+		['Current Node', 'Input Data', 'Binary', 'JSON'].includes(props.item.name) &&
+		props.item.key === undefined;
+
+	if (shouldAutoExtend) {
+		extended.value = true;
+	}
+});
+
+const optionSelected = (command: string, item: IVariableSelectorOption) => {
+	let variable = item.key ?? '';
+	if (command === 'arrayValues') {
+		variable = `${item.key}.join(', ')`;
+	} else if (command === 'arrayLength') {
+		variable = `${item.key}.length`;
+	} else if (command === 'objectKeys') {
+		variable = `Object.keys(${item.key}).join(', ')`;
+	} else if (command === 'objectValues') {
+		variable = `Object.values(${item.key}).join(', ')`;
+	}
+	emit('itemSelected', { variable });
+};
+
+const selectItem = (item: IVariableSelectorOption) => {
+	emit('itemSelected', { variable: item.key ?? '' });
+};
+
+const forwardItemSelected = (eventData: IVariableItemSelected) => {
+	emit('itemSelected', eventData);
+};
 </script>
 
 <style scoped lang="scss">
